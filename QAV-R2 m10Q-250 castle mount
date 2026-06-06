@@ -1,0 +1,140 @@
+// ============================================================
+//  Parametric GPS mount  —  Lumenier QAV-S2 / QAV-R2
+//  Fits Foxeer M10Q-250 (25 mm) or M10Q-180 (18 mm)
+//  Units: millimeters
+//
+//  HOW TO USE
+//   1. Measure your frame's 4 front holes with calipers.
+//      Put hole 1 at the origin [0,0]; record the other three
+//      as [x, y] offsets from it. Don't assume a clean rectangle.
+//   2. Replace the HOLES list below with your real numbers.
+//   3. Set GPS_SIZE to 25 (M10Q-250) or 18 (M10Q-180).
+//   4. F5 = preview, F6 = render, F7 = export STL.
+//
+//  Tune anything in the EDIT section. The GEOMETRY section can
+//  stay untouched unless you want to change the shape itself.
+// ============================================================
+
+
+// ===================== EDIT ME =====================
+
+// --- Measured frame holes, [x, y] in mm, hole 1 at origin ---
+//     FRAME: Lumenier QAV-R2
+//     Rectangle: 29.3 mm wide x 41.8 mm front-to-back (center-to-center).
+//     Derived from inner-edge gaps of 26.5 and 39.0 mm + 2.8 mm hole dia.
+//     (For the QAV-S2, measure its front holes and swap in a new list.)
+HOLES = [ [0, 0], [29.3, 0], [0, 41.8], [29.3, 41.8] ];
+
+SCREW_CLEAR_DIA = 3.2;   // M3 screw passes through the mount (NOT the 2.8 frame hole)
+
+// --- GPS module ---
+GPS_SIZE      = 25;      // 25 = M10Q-250, 18 = M10Q-180
+GPS_CLEARANCE = 0.4;     // extra space per side so the board drops in
+
+// --- Base plate ---
+BASE_THICK  = 3;         // plate thickness
+BASE_MARGIN = 5;         // how far the plate extends past each hole
+
+// --- Riser (lifts the antenna up and away) ---
+RISER_HEIGHT = 12;       // height of tray floor above the plate top
+
+// --- Center channel: hollows the riser AND routes the plug + wires ---
+//     Square hole down the middle, through plate + riser + tray floor.
+//     Plug seats into it; wires route down through the center into the frame.
+//     NOTE: for the 18mm M10Q-180 drop this to ~12 so the board keeps a
+//     floor rim to rest on. 18 is fine for the 25mm M10Q-250.
+CENTER_BORE = 18;
+
+// --- Tray that cradles the GPS ---
+TRAY_FLOOR = 1.5;        // tray floor thickness
+TRAY_WALL  = 2;          // wall thickness
+WALL_H     = 8;          // wall height; set to your GPS thickness (~8mm)
+                         //   so the corner lips land on the board's top edge
+PIGTAIL_W  = 6;          // optional side wire notch (rear, -Y wall)
+
+// --- Top retention lips (snap over the GPS top corners) ---
+LIP_OVER = 1.5;          // how far each corner lip reaches in over the board
+LIP_H    = 1.2;          // lip thickness
+
+// --- Where the tray sits relative to the hole pattern ---
+//     [0,0] = centered on the holes. Shift to match the reference
+//     position (e.g. [0, 15] pushes it forward toward the camera).
+TRAY_OFFSET = [0, 0];
+
+
+// ===================== GEOMETRY =====================
+$fn = 48;
+
+// center of the hole bounding box
+cx = (min([for (p = HOLES) p[0]]) + max([for (p = HOLES) p[0]])) / 2;
+cy = (min([for (p = HOLES) p[1]]) + max([for (p = HOLES) p[1]])) / 2;
+tpx = cx + TRAY_OFFSET[0];
+tpy = cy + TRAY_OFFSET[1];
+
+tin  = GPS_SIZE + 2 * GPS_CLEARANCE;   // inner pocket size
+tout = tin + 2 * TRAY_WALL;            // outer tray size
+
+module base_plate() {
+    difference() {
+        // plate = rounded hull hugging the holes
+        linear_extrude(BASE_THICK)
+            hull() for (h = HOLES) translate(h) circle(r = BASE_MARGIN);
+        // screw clearance holes
+        for (h = HOLES)
+            translate([h[0], h[1], -1])
+                cylinder(d = SCREW_CLEAR_DIA, h = BASE_THICK + 2);
+    }
+}
+
+module riser() {
+    translate([tpx, tpy, 0]) hull() {
+        translate([0, 0, BASE_THICK])
+            linear_extrude(0.1) square(tout + 4, center = true);
+        translate([0, 0, BASE_THICK + RISER_HEIGHT])
+            linear_extrude(0.1) square(tout, center = true);
+    }
+}
+
+module tray() {
+    translate([tpx, tpy, BASE_THICK + RISER_HEIGHT]) {
+        // floor + walls, minus the pocket and the optional wire notch
+        difference() {
+            translate([-tout/2, -tout/2, 0])
+                cube([tout, tout, TRAY_FLOOR + WALL_H]);
+            // GPS pocket (open top)
+            translate([-tin/2, -tin/2, TRAY_FLOOR])
+                cube([tin, tin, WALL_H + 2]);
+            // optional wire notch through the rear (-Y) wall
+            translate([-PIGTAIL_W/2, -tout/2 - 1, TRAY_FLOOR])
+                cube([PIGTAIL_W, TRAY_WALL + 2, WALL_H + 2]);
+        }
+        // snap-over retention lips at the four top corners
+        for (sx = [1, -1]) for (sy = [1, -1])
+            scale([sx, sy, 1]) corner_lip();
+    }
+}
+
+// one corner lip (canonical +x,+y corner; scaled to the other three)
+module corner_lip() {
+    base_z = TRAY_FLOOR + WALL_H;            // sits at the GPS top edge
+    hull() {
+        // catch: reaches inward over the board at the bottom of the lip
+        translate([tin/2 - LIP_OVER, tin/2 - LIP_OVER, base_z])
+            cube([LIP_OVER + 0.01, LIP_OVER + 0.01, 0.01]);
+        // ramped top pulled back toward the wall for an easy push-in
+        translate([tin/2 - LIP_OVER*0.3, tin/2 - LIP_OVER*0.3, base_z + LIP_H])
+            cube([LIP_OVER*0.3 + 0.01, LIP_OVER*0.3 + 0.01, 0.01]);
+    }
+}
+
+difference() {
+    union() {
+        base_plate();
+        riser();
+        tray();
+    }
+    // central channel: hollow center + plug clearance + wire pass-through
+    translate([tpx - CENTER_BORE/2, tpy - CENTER_BORE/2, -1])
+        cube([CENTER_BORE, CENTER_BORE,
+              BASE_THICK + RISER_HEIGHT + TRAY_FLOOR + 2]);
+}
