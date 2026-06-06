@@ -1,0 +1,190 @@
+// ============================================================
+//  Parametric GPS mount  —  Lumenier QAV-S2
+//  Fits Foxeer M10Q-180 (18 mm)
+//  Units: millimeters
+//
+//  HOW TO USE
+//   1. Measurements filled in below, converted from your inner-edge
+//      gaps to center-to-center (added 2.8 mm = one hole diameter).
+//   2. F5 = preview, F6 = render, F7 = export STL.
+//
+//  Tune anything in the EDIT section. The GEOMETRY section can
+//  stay untouched unless you want to change the shape itself.
+// ============================================================
+
+
+// ===================== EDIT ME =====================
+
+// --- Measured frame holes, [x, y] in mm (center-to-center) ---
+//     FRAME: Lumenier QAV-S2  (symmetric TRAPEZOID)
+//     Inner-edge gaps: front 21.5, rear 25.5, front->rear 40.5.
+//     +2.8 mm hole dia -> centers: front 24.3, rear 28.3, depth 43.3.
+//     Front holes at y=0, rear at y=43.3; pattern centered on x=0.
+HOLES = [
+    [-12.15,  0   ],   // front-left   (24.3 / 2)
+    [ 12.15,  0   ],   // front-right
+    [-14.15, 43.3 ],   // rear-left    (28.3 / 2)
+    [ 14.15, 43.3 ],   // rear-right
+];
+
+SCREW_CLEAR_DIA = 3.2;   // M3 screw passes through the mount (NOT the 2.8 frame hole)
+
+// --- GPS module ---
+GPS_SIZE      = 18;      // 25 = M10Q-250, 18 = M10Q-180
+GPS_CLEARANCE = 0.4;     // extra space per side so the board drops in
+
+// --- Base plate ---
+BASE_THICK  = 3;         // plate thickness
+BASE_MARGIN = 5;         // how far the plate extends past each hole
+
+// --- Riser (lifts the antenna up and away) ---
+RISER_HEIGHT = 12;       // height of tray floor above the plate top
+
+// --- Center channel: hollows the riser AND routes the plug + wires ---
+//     Square hole down the middle, through plate + riser + tray floor.
+//     Plug seats into it; wires route down through the center into the frame.
+//     12 keeps a ~3.4 mm floor rim for the 18 mm M10Q-180 to rest on.
+CENTER_BORE = 12;
+
+// --- Tray that cradles the GPS ---
+TRAY_FLOOR = 1.5;        // tray floor thickness
+TRAY_WALL  = 2;          // wall thickness
+WALL_H     = 8;          // wall height; set to your GPS thickness (~8mm)
+                         //   so the corner lips land on the board's top edge
+PIGTAIL_W  = 6;          // optional side wire notch (rear, -Y wall)
+
+// --- Top retention lips (snap over the GPS top corners) ---
+LIP_OVER = 1.5;          // how far each corner lip reaches in over the board
+LIP_H    = 1.2;          // lip thickness
+
+// --- Where the tray sits relative to the hole pattern ---
+//     [0,0] = centered on the holes. Shift to match the reference
+//     position (e.g. [0, 15] pushes it forward toward the camera).
+TRAY_OFFSET = [0, 0];
+
+// --- Front LED light box (hollow, glass-covered) ---
+ADD_LED_BOX = true;      // false = plain GPS mount with no light box
+BOX_W = 46.5;            // interior width  (X) - LED module space
+BOX_H = 17.5;            // interior height (Z)
+BOX_D = 9;               // interior depth  (Y) - how far it projects forward
+BOX_WALL = 1.5;          // box wall thickness
+GLASS_LIP = 1.5;         // front lip that retains the glass
+BOX_Z0 = BASE_THICK;     // box sits on the plate; raise to lift the box
+WIRE_CHAN = 10;          // wire channel size from the box to the center bore
+ACCESS_DIA = 6;          // driver access holes over the front screws
+
+
+// ===================== GEOMETRY =====================
+$fn = 48;
+
+// center of the hole bounding box
+cx = (min([for (p = HOLES) p[0]]) + max([for (p = HOLES) p[0]])) / 2;
+cy = (min([for (p = HOLES) p[1]]) + max([for (p = HOLES) p[1]])) / 2;
+tpx = cx + TRAY_OFFSET[0];
+tpy = cy + TRAY_OFFSET[1];
+
+tin  = GPS_SIZE + 2 * GPS_CLEARANCE;   // inner pocket size
+tout = tin + 2 * TRAY_WALL;            // outer tray size
+
+module base_plate() {
+    difference() {
+        // plate = rounded hull hugging the holes
+        linear_extrude(BASE_THICK)
+            hull() for (h = HOLES) translate(h) circle(r = BASE_MARGIN);
+        // screw clearance holes
+        for (h = HOLES)
+            translate([h[0], h[1], -1])
+                cylinder(d = SCREW_CLEAR_DIA, h = BASE_THICK + 2);
+    }
+}
+
+module riser() {
+    translate([tpx, tpy, 0]) hull() {
+        translate([0, 0, BASE_THICK])
+            linear_extrude(0.1) square(tout + 4, center = true);
+        translate([0, 0, BASE_THICK + RISER_HEIGHT])
+            linear_extrude(0.1) square(tout, center = true);
+    }
+}
+
+module tray() {
+    translate([tpx, tpy, BASE_THICK + RISER_HEIGHT]) {
+        // floor + walls, minus the pocket and the optional wire notch
+        difference() {
+            translate([-tout/2, -tout/2, 0])
+                cube([tout, tout, TRAY_FLOOR + WALL_H]);
+            // GPS pocket (open top)
+            translate([-tin/2, -tin/2, TRAY_FLOOR])
+                cube([tin, tin, WALL_H + 2]);
+            // optional wire notch through the rear (-Y) wall
+            translate([-PIGTAIL_W/2, -tout/2 - 1, TRAY_FLOOR])
+                cube([PIGTAIL_W, TRAY_WALL + 2, WALL_H + 2]);
+        }
+        // snap-over retention lips at the four top corners
+        for (sx = [1, -1]) for (sy = [1, -1])
+            scale([sx, sy, 1]) corner_lip();
+    }
+}
+
+// one corner lip (canonical +x,+y corner; scaled to the other three)
+module corner_lip() {
+    base_z = TRAY_FLOOR + WALL_H;            // sits at the GPS top edge
+    hull() {
+        // catch: reaches inward over the board at the bottom of the lip
+        translate([tin/2 - LIP_OVER, tin/2 - LIP_OVER, base_z])
+            cube([LIP_OVER + 0.01, LIP_OVER + 0.01, 0.01]);
+        // ramped top pulled back toward the wall for an easy push-in
+        translate([tin/2 - LIP_OVER*0.3, tin/2 - LIP_OVER*0.3, base_z + LIP_H])
+            cube([LIP_OVER*0.3 + 0.01, LIP_OVER*0.3 + 0.01, 0.01]);
+    }
+}
+
+// ----- Front LED light box -----
+module led_box_shell() {
+    ow = BOX_W + 2*BOX_WALL;
+    oh = BOX_H + 2*BOX_WALL;
+    od = BOX_D + 2*BOX_WALL;
+    back_y  = (cy - (tout + 4)/2) + 2;   // welds into the riser front
+    front_y = back_y - od;               // forward (-Y) face
+    translate([cx - ow/2, front_y, BOX_Z0])
+        cube([ow, od, oh]);
+}
+
+module led_box_voids() {
+    ow = BOX_W + 2*BOX_WALL;
+    oh = BOX_H + 2*BOX_WALL;
+    od = BOX_D + 2*BOX_WALL;
+    back_y  = (cy - (tout + 4)/2) + 2;
+    front_y = back_y - od;
+    bore_front = cy - CENTER_BORE/2;
+    // cavity for the LED module
+    translate([cx - BOX_W/2, front_y + BOX_WALL, BOX_Z0 + BOX_WALL])
+        cube([BOX_W, BOX_D, BOX_H]);
+    // front opening with a retaining lip all around (holds the glass)
+    translate([cx - (BOX_W - 2*GLASS_LIP)/2, front_y - 1,
+               BOX_Z0 + BOX_WALL + GLASS_LIP])
+        cube([BOX_W - 2*GLASS_LIP, BOX_WALL + 2, BOX_H - 2*GLASS_LIP]);
+    // wire channel from the cavity back into the center bore
+    translate([cx - WIRE_CHAN/2, back_y - BOX_WALL - 1, BOX_Z0 + BOX_WALL + 2])
+        cube([WIRE_CHAN, (bore_front + 2) - (back_y - BOX_WALL - 1), WIRE_CHAN]);
+    // screwdriver access for the front frame screws sitting under the box
+    for (h = HOLES)
+        if (h[1] > front_y && h[1] < back_y)
+            translate([h[0], h[1], BASE_THICK])
+                cylinder(d = ACCESS_DIA, h = (BOX_Z0 + oh) - BASE_THICK + 1);
+}
+
+difference() {
+    union() {
+        base_plate();
+        riser();
+        tray();
+        if (ADD_LED_BOX) led_box_shell();
+    }
+    // central channel: hollow center + plug clearance + wire pass-through
+    translate([tpx - CENTER_BORE/2, tpy - CENTER_BORE/2, -1])
+        cube([CENTER_BORE, CENTER_BORE,
+              BASE_THICK + RISER_HEIGHT + TRAY_FLOOR + 2]);
+    // LED box internal voids
+    if (ADD_LED_BOX) led_box_voids();
+}
